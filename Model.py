@@ -21,6 +21,10 @@ class Model(object):
         # populate it all
         self.readIn()
 
+        # Init constraints. Right now, just use the same points
+        self.cVertices = range(1,len(self.vertices))
+        self.cFaces    = range(1,len(self.faces))
+
     def readIn(self):
         with open(self.filename) as f:
             content = f.readlines()
@@ -76,7 +80,7 @@ class Model(object):
                 if len(x) < 3 or len(y) < 3 or len(z) < 3:
                     raise Exception("Invalid Face Format")
 
-                self.faces.append(Face(x[0],x[2],y[0],y[2],z[0],z[2]))
+                self.faces.append(Face(int(x[0])-1,int(x[2])-1,int(y[0])-1,int(y[2])-1,int(z[0])-1,int(z[2])-1))
 
     def flip(self, flipx, flipy, flipz):
         for i in range(len(self.vertices)):
@@ -114,16 +118,16 @@ class Model(object):
 
 
     def get2D(self, plane):
-        # if x.z < 0.12
-        # if x.z < 0.12
-        # if x.z < 0.12
-
         if len(plane) != 2 or plane not in ["xy","yz","xz"]:
             raise Exception("Invalid plane.\n\tValid planes are [\"xy\",\"yz\",\"xz\"")
 
-        xs = [x.x for x in self.vertices]
-        ys = [x.y for x in self.vertices]
-        zs = [x.z for x in self.vertices]
+        # Use contraints
+        #xs = [x.x for x in self.vertices]
+        #ys = [x.y for x in self.vertices]
+        #zs = [x.z for x in self.vertices]
+        xs = [self.vertices[i].x for i in self.cVertices]
+        ys = [self.vertices[i].y for i in self.cVertices]
+        zs = [self.vertices[i].z for i in self.cVertices]
 
         fig = plt.figure()
 
@@ -134,9 +138,13 @@ class Model(object):
         elif plane == "xz":
             plt.scatter(xs, zs, c=ys, s=100, cmap='gray')
 
+        constraints = []
+
         def onclick(event):
-            print event.x
-            print event.y
+            constraints.append((event.xdata.item(), event.ydata.item()))
+
+            if len(constraints) >= 2:
+                plt.close()
 
         cid = fig.canvas.mpl_connect('button_press_event', onclick)
 
@@ -144,10 +152,118 @@ class Model(object):
 
         fig.canvas.mpl_disconnect(cid)
 
+        return constraints
+
+    def drawConstraints(self, plane):
+        if len(plane) != 2 or plane not in ["xy","yz","xz"]:
+            raise Exception("Invalid plane.\n\tValid planes are [\"xy\",\"yz\",\"xz\"")
+
+        xs = [self.vertices[i].x for i in self.cVertices]
+        ys = [self.vertices[i].y for i in self.cVertices]
+        zs = [self.vertices[i].z for i in self.cVertices]
+
+        fig = plt.figure()
+
+        if plane == "xy":
+            plt.scatter(xs, ys, c=zs, s=100, cmap='gray')
+        elif plane == "yz":
+            plt.scatter(ys, zs, c=xs, s=100, cmap='gray')
+        elif plane == "xz":
+            plt.scatter(xs, zs, c=ys, s=100, cmap='gray')
+
+        plt.show()
+
     def drawXY(self):
         xs = [x.x for x in self.vertices]
         ys = [x.y for x in self.vertices]
         zs = [x.z for x in self.vertices]
+
+    def constrain(self, axis, gt, lt):
+        if type(axis) is not str or axis not in ["x","y","z"]:
+            raise Exception("Improper axis given")
+
+        if (type(gt) is not int and type(gt) is not float) or (type(lt) is not int and type(lt) is not float):
+            raise ValueError("Must use float or integer as constraints; given " + str(type(gt)) + " and " + str(type(lt)))
+
+        if axis == "x":
+            self.cVertices = [i for i in self.cVertices if self.vertices[i].x > gt and self.vertices[i].x < lt]
+            self.cFaces = [i for i in self.cFaces if self.vertices[self.faces[i].v1].x > gt and self.vertices[self.faces[i].v1].x < lt and self.vertices[self.faces[i].v2].x > gt and self.vertices[self.faces[i].v2].x < lt and self.vertices[self.faces[i].v3].x > gt and self.vertices[self.faces[i].v3].x < lt]
+        elif axis == "y":
+            self.cVertices = [i for i in self.cVertices if self.vertices[i].y > gt and self.vertices[i].y < lt]
+            self.cFaces = [i for i in self.cFaces if self.vertices[self.faces[i].v1].y > gt and self.vertices[self.faces[i].v1].y < lt and self.vertices[self.faces[i].v2].y > gt and self.vertices[self.faces[i].v2].y < lt and self.vertices[self.faces[i].v3].y > gt and self.vertices[self.faces[i].v3].y < lt]
+        elif axis == "z":
+            self.cVertices = [i for i in self.cVertices if self.vertices[i].z > gt and self.vertices[i].z < lt]
+            self.cFaces = [i for i in self.cFaces if self.vertices[self.faces[i].v1].z > gt and self.vertices[self.faces[i].v1].z < lt and self.vertices[self.faces[i].v2].z > gt and self.vertices[self.faces[i].v2].z < lt and self.vertices[self.faces[i].v3].z > gt and self.vertices[self.faces[i].v3].z < lt]
+
+    # Slicing
+    def iPlane(self, f, y):
+        points = [self.vertices[f.v1], self.vertices[f.v2], self.vertices[f.v3]]
+
+        # ensure the triangle intersects the plane
+        above = False
+        below = False
+        on    = False
+
+        for p in points:
+            if p.y > y:
+                above = True
+            if p.y == y:
+                on = True
+            if p.y < y:
+                below = True
+
+        # TODO: Handle the case where only one point of the triangle is on the plane
+
+        if not (above and below):
+            return False
+
+        return True
+
+    # sliceFByY
+    # Gets the intersection of a plane and a face
+    # returns a tuple with the two points that define the intersection
+    def sliceFByY(self, f, y):
+        if not self.iPlane(f, y):
+            raise Exception("Triangle does not intersect plane")
+
+        points = [self.vertices[f.v1], self.vertices[f.v2], self.vertices[f.v3]]
+
+        combs = [(0,1), (0,2), (1,2)]
+        results = []
+
+        for c in combs:
+            if len(results) >= 2:
+                break
+
+            # only care about the combinations that intersect the plane
+            if (points[c[0]].y >= y and points[c[1]].y < y) or (points[c[0]].y < y and points[c[1]].y >= y):
+                t0 = points[c[0]]
+                t1 = points[c[1]]
+
+                factor = (y - t0.y) / (t1.y - t0.y)
+
+                x = t0.x + (t1.x - t0.x) * factor
+                z = t0.z + (t1.z - t0.z) * factor
+
+                results.append((x,z))
+
+        if len(results) < 2:
+            raise Exception("Not enough intersection points")
+
+        return results
+
+    def sliceY(self, y):
+        # Get all the faces that intersect our plane
+        faces = [x for x in self.faces if self.iPlane(x, y)]
+
+        results = []
+
+        for f in faces:
+            points = self.sliceFByY(f, y)
+            results.append(points[0])
+            results.append(points[1])
+
+        return results
 
     def printStats(self):
         print "Total vertices: " + str(len(self.vertices))
